@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en" style="margin: 0; padding: 0; box-sizing: border-box;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Thumbnail Downloader</title>
+</head>
+<body style="margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); color: #ffffff; min-height: 100vh; line-height: 1.6;">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 2rem;">
+        <div style="margin-bottom: 3rem;">
+            <p style="text-align: center; font-size: 1.2rem; color: #94a3b8;">Download thumbnails from any YouTube video in different qualities</p>
+        </div>
+
+        <div style="background: rgba(30, 41, 59, 0.7); border-radius: 1rem; padding: 2rem; backdrop-filter: blur(10px); box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+            <div style="margin-bottom: 2rem;">
+                <label for="videoUrl" style="display: block; font-size: 0.875rem; font-weight: 500; color: #e2e8f0; margin-bottom: 0.5rem;">
+                    YouTube Video URL
+                </label>
+                <input
+                    type="text"
+                    id="videoUrl"
+                    placeholder="Paste YouTube video URL here..."
+                    style="width: 100%; padding: 0.75rem 1rem; font-size: 1rem; color: #ffffff; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 0.5rem; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);"
+                />
+                <div id="error" style="display: none; margin-top: 0.75rem; padding: 0.75rem; background: rgba(239, 68, 68, 0.1); border-radius: 0.5rem; color: #ef4444;">
+                    <span id="errorText"></span>
+                </div>
+            </div>
+
+            <div id="preview" style="display: none; margin-bottom: 2rem; aspect-ratio: 16/9; background: rgba(15, 23, 42, 0.5); border-radius: 0.5rem; overflow: hidden;">
+                <img id="thumbnailPreview" src="" alt="Video thumbnail preview" style="width: 100%; height: 100%; object-fit: cover;" />
+            </div>
+
+            <div id="downloadButtons" style="display: none; grid-gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));">
+                <!-- Buttons will be dynamically added here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const videoUrlInput = document.getElementById('videoUrl');
+        const errorDiv = document.getElementById('error');
+        const errorText = document.getElementById('errorText');
+        const preview = document.getElementById('preview');
+        const thumbnailPreview = document.getElementById('thumbnailPreview');
+        const downloadButtons = document.getElementById('downloadButtons');
+
+        const THUMBNAIL_QUALITIES = [
+            { id: 'maxresdefault', label: 'Maximum Resolution', resolution: '1920×1080' },
+            { id: 'sddefault', label: 'Standard Definition', resolution: '640×480' },
+            { id: 'hqdefault', label: 'High Quality', resolution: '480×360' },
+            { id: 'mqdefault', label: 'Medium Quality', resolution: '320×180' },
+            { id: 'default', label: 'Default Quality', resolution: '120×90' }
+        ];
+
+        function createButton(quality) {
+            const button = document.createElement('button');
+            button.style.cssText = `
+                width: 100%;
+                padding: 1rem;
+                font-size: 1rem;
+                font-weight: 500;
+                color: #ffffff;
+                background: #3b82f6;
+                border: none;
+                border-radius: 0.5rem;
+                cursor: pointer;
+                transition: all 0.2s;
+                box-shadow: 0 4px 6px -1px rgba(59, 130, 246, 0.2);
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                gap: 0.5rem;
+            `;
+            
+            const labelSpan = document.createElement('span');
+            labelSpan.textContent = quality.label;
+            
+            const resolutionSpan = document.createElement('span');
+            resolutionSpan.textContent = quality.resolution;
+            resolutionSpan.style.cssText = `
+                font-size: 0.875rem;
+                color: rgba(255, 255, 255, 0.8);
+            `;
+            
+            button.appendChild(labelSpan);
+            button.appendChild(resolutionSpan);
+            button.addEventListener('click', () => downloadThumbnail(quality.id));
+            
+            // Add hover and active effects
+            button.addEventListener('mouseover', () => {
+                button.style.transform = 'translateY(-2px)';
+                button.style.boxShadow = '0 6px 8px -1px rgba(59, 130, 246, 0.3)';
+            });
+            button.addEventListener('mouseout', () => {
+                button.style.transform = 'translateY(0)';
+                button.style.boxShadow = '0 4px 6px -1px rgba(59, 130, 246, 0.2)';
+            });
+            button.addEventListener('mousedown', () => {
+                button.style.transform = 'translateY(0)';
+            });
+            button.addEventListener('mouseup', () => {
+                button.style.transform = 'translateY(-2px)';
+            });
+            
+            return button;
+        }
+
+        function extractVideoId(url) {
+            const patterns = [
+                /(?:youtube\.com\/watch\?v=|youtu.be\/)([^&\n?#]+)/,
+                /youtube.com\/shorts\/([^&\n?#]+)/
+            ];
+
+            for (const pattern of patterns) {
+                const match = url.match(pattern);
+                if (match) return match[1];
+            }
+            return null;
+        }
+
+        function showError(message) {
+            errorText.textContent = message;
+            errorDiv.style.display = 'flex';
+            preview.style.display = 'none';
+            downloadButtons.style.display = 'none';
+        }
+
+        function hideError() {
+            errorDiv.style.display = 'none';
+        }
+
+        async function checkImageExists(url) {
+            return new Promise((resolve) => {
+                const img = new Image();
+                img.onload = function() {
+                    resolve(this.width > 120 && this.height > 90);
+                };
+                img.onerror = function() {
+                    resolve(false);
+                };
+                img.src = url;
+            });
+        }
+
+        async function findAvailableThumbnails(videoId) {
+            const availableQualities = [];
+            
+            for (const quality of THUMBNAIL_QUALITIES) {
+                const url = `https://img.youtube.com/vi/${videoId}/${quality.id}.jpg`;
+                if (await checkImageExists(url)) {
+                    availableQualities.push({
+                        ...quality,
+                        url
+                    });
+                }
+            }
+            
+            return availableQualities;
+        }
+
+        async function downloadThumbnail(qualityId) {
+            const videoId = extractVideoId(videoUrlInput.value);
+            if (!videoId) return;
+
+            try {
+                const url = `https://img.youtube.com/vi/${videoId}/${qualityId}.jpg`;
+                const response = await fetch(url);
+                if (!response.ok) throw new Error('Failed to download thumbnail.');
+
+                const blob = await response.blob();
+                const blobUrl = window.URL.createObjectURL(blob);
+                
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download =`youtube-thumbnail-${qualityId}.jpg`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(blobUrl);
+            } catch (error) {
+                showError(error.message || 'Failed to download thumbnail. Please try again.');
+            }
+        }
+
+        let previewTimeout;
+        async function updatePreview(videoId) {
+            try {
+                if (previewTimeout) {
+                    clearTimeout(previewTimeout);
+                }
+
+                const availableQualities = await findAvailableThumbnails(videoId);
+                
+                if (availableQualities.length === 0) {
+                    throw new Error('No thumbnails available for this video.');
+                }
+
+                // Show the highest quality thumbnail in preview
+                thumbnailPreview.src = availableQualities[0].url;
+                preview.style.display = 'block';
+                
+                // Clear and update download buttons
+                downloadButtons.innerHTML = '';
+                availableQualities.forEach(quality => {
+                    downloadButtons.appendChild(createButton(quality));
+                });
+                downloadButtons.style.display = 'grid';
+                
+                hideError();
+            } catch (error) {
+                showError(error.message);
+            }
+        }
+
+        videoUrlInput.addEventListener('input', function(e) {
+            const url = e.target.value;
+            hideError();
+
+            if (url.trim() === '') {
+                preview.style.display = 'none';
+                downloadButtons.style.display = 'none';
+                return;
+            }
+
+            const videoId = extractVideoId(url);
+            if (videoId) {
+                if (previewTimeout) {
+                    clearTimeout(previewTimeout);
+                }
+                previewTimeout = setTimeout(() => {
+                    updatePreview(videoId);
+                }, 500);
+            } else {
+                showError('Invalid YouTube URL. Please enter a valid YouTube video or shorts URL.');
+            }
+        });
+
+        // Input focus styles
+        videoUrlInput.addEventListener('focus', () => {
+            videoUrlInput.style.outline = 'none';
+            videoUrlInput.style.borderColor = '#3b82f6';
+            videoUrlInput.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.3)';
+        });
+
+        videoUrlInput.addEventListener('blur', () => {
+            videoUrlInput.style.borderColor = 'rgba(148, 163, 184, 0.2)';
+            videoUrlInput.style.boxShadow = '0 4px 6px -1px rgba(0, 0, 0, 0.1)';
+        });
+    </script>
+</body>
+</html>
